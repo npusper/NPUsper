@@ -1,0 +1,2 @@
+add_executable(simul_streaming simul_streaming.cpp)
+target_link_libraries(simul_streaming PRIVATE common whisper_ort)

@@ -1,0 +1,2 @@
+add_executable(ours_streaming ours_streaming.cpp)
+target_link_libraries(ours_streaming PRIVATE common whisper_ort)

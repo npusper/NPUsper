@@ -1,0 +1,42 @@
+# Build artifacts
+**/build/
+
+# Model binaries (large, exclude ggml/onnx models)
+**/models/ggml-*.bin
+**/models/base/*.onnx
+**/models/base/*.onnx.data
+**/*.onnx
+**/*.onnx.data
+
+# Experiment results
+**/eval/comparison_results*/
+**/eval/__pycache__/
+**/eval/*.pyc
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+
+# Data (symlink to external dataset)
+data/
+
+# Compiled objects
+*.o
+*.a
+*.so
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Original repo CI/CD (not needed)
+.devops/
+.github/

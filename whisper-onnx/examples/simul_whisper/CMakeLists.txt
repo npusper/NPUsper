@@ -1,0 +1,2 @@
+add_executable(simul_whisper simul_whisper.cpp)
+target_link_libraries(simul_whisper PRIVATE common whisper_ort)
