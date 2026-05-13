@@ -1,0 +1,60 @@
+--- original/model_adaptation.py	2026-02-20 15:36:43.665414828 +0900
++++ modified/model_adaptation.py	2026-02-20 15:36:33.807372516 +0900
+@@ -118,9 +118,6 @@
+ 
+         # Initialize output projection layer
+         self.out_proj = Conv2DWithBias(self.embed_dim, self.embed_dim, kernel_size=1)
+-
+-        # Initialize output projection layer
+-        self.out_proj = Conv2DWithBias(self.embed_dim, self.embed_dim, kernel_size=1)
+         # Copy and convert the weights from original attention for out_proj
+         out_weight = expand_to_rank4(origin_attn.out_proj.weight.data.clone())
+         self.out_proj.weight.data.copy_(out_weight)
+@@ -197,14 +194,21 @@
+             ]
+ 
+         if self.is_decoder and self.is_causal is True:
+-            past_key_value_rt = (
+-                torch.cat(key_states, dim=0)[:, :, :, 1:].reshape(
+-                    self.num_heads, bsz, self.head_dim, -1
+-                ),
+-                torch.cat(value_states, dim=0)[:, :, 1:, :].reshape(
+-                    self.num_heads, bsz, -1, self.head_dim
+-                ),
+-            )
++            if getattr(self, "nstep_mode", False):
++                # n-step mode: no trim, no reshape — cache grows by 1 each step
++                past_key_value_rt = (
++                    torch.cat(key_states, dim=0),
++                    torch.cat(value_states, dim=0),
++                )
++            else:
++                past_key_value_rt = (
++                    torch.cat(key_states, dim=0)[:, :, :, 1:].reshape(
++                        self.num_heads, bsz, self.head_dim, -1
++                    ),
++                    torch.cat(value_states, dim=0)[:, :, 1:, :].reshape(
++                        self.num_heads, bsz, -1, self.head_dim
++                    ),
++                )
+ 
+         src_len = value_states[0].size(-2)
+         attn_weights = [
+@@ -680,6 +684,17 @@
+             setattr(model, name, qc_decoder_module(module))
+ 
+ 
++def set_nstep_mode(model: nn.Module) -> None:
++    """
++    Enable n-step mode on all SHAAttention modules.
++    In n-step mode, the self-attention KV cache grows by 1 each step
++    instead of maintaining a fixed sliding window.
++    """
++    for module in model.modules():
++        if isinstance(module, SHAAttention):
++            module.nstep_mode = True
++
++
+ def monkey_patch_model(model: WhisperModel) -> None:
+     """
+     Applies a series of modifications to the Whisper model, including replacing components,

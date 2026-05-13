@@ -1,0 +1,61 @@
+--- original/model.py	2026-02-20 15:36:43.666414866 +0900
++++ modified/model.py	2026-02-20 15:36:34.400370899 +0900
+@@ -270,6 +270,58 @@
+ 
+         return specs
+ 
++    @staticmethod
++    def get_input_spec_for_step(
++        step: int,
++        num_blocks: int = 12,
++        attention_dim: int = 768,
++        num_heads: int = 12,
++    ) -> InputSpec:
++        """
++        Returns the input specification for a specific decoding step in n-step mode.
++
++        In n-step mode, the self-attention KV cache size equals step + 1
++        (1 dummy + step real entries). The attention mask size is step + 2.
++
++        Parameters
++        ----------
++        step
++            The decoding step index (0-based).
++        """
++        head_dim = attention_dim // num_heads
++        cache_len = step + 1  # 1 dummy + step real entries
++        mask_len = step + 2   # attends to cache_len + 1 (current token)
++
++        specs: InputSpec = dict(
++            input_ids=((1, 1), "int32"),
++            attention_mask=((1, 1, 1, mask_len), "float32"),
++        )
++        kv_cache_self: InputSpec = {}
++        for i in range(num_blocks):
++            kv_cache_self[f"k_cache_self_{i}_in"] = (
++                (num_heads, 1, head_dim, cache_len),
++                "float32",
++            )
++            kv_cache_self[f"v_cache_self_{i}_in"] = (
++                (num_heads, 1, cache_len, head_dim),
++                "float32",
++            )
++        kv_cache_cross: InputSpec = {}
++        for i in range(num_blocks):
++            kv_cache_cross[f"k_cache_cross_{i}"] = (
++                (num_heads, 1, head_dim, AUDIO_EMB_LEN),
++                "float32",
++            )
++            kv_cache_cross[f"v_cache_cross_{i}"] = (
++                (num_heads, 1, AUDIO_EMB_LEN, head_dim),
++                "float32",
++            )
++        specs.update(kv_cache_self)
++        specs.update(kv_cache_cross)
++        specs["position_ids"] = ((1,), "int32")
++
++        return specs
++
+     def _get_input_spec_for_instance(self) -> InputSpec:
+         return self.__class__.get_input_spec(
+             self.config.decoder_layers,

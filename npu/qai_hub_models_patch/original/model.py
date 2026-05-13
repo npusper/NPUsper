@@ -1,0 +1,374 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+from abc import abstractmethod
+from typing import Any, cast
+
+import torch
+from qai_hub import Device
+from transformers import (
+    WhisperConfig,
+    WhisperFeatureExtractor,
+    WhisperForConditionalGeneration,
+    WhisperTokenizer,
+)
+from transformers.models.whisper.modeling_whisper import WhisperDecoder, WhisperEncoder
+from typing_extensions import Self
+
+from qai_hub_models.models._shared.hf_whisper.model_adaptation import (
+    monkey_patch_model,
+)
+from qai_hub_models.models.common import Precision, TargetRuntime
+from qai_hub_models.utils.base_model import (
+    BaseModel,
+    CollectionModel,
+)
+from qai_hub_models.utils.input_spec import InputSpec
+
+MODEL_ID = "hf_whisper_asr_shared"
+MODEL_ASSET_VERSION = 1
+
+# 20ms sample rate
+SAMPLE_RATE = 16000
+
+# Audio chunk length in seconds
+CHUNK_LENGTH = 30
+
+# Samples per chunk
+N_SAMPLES = CHUNK_LENGTH * SAMPLE_RATE  # 480000 20ms samples in a 30-second chunk
+
+# The official default max decoded length is 448. We use decoded length 200 for benchmarking purpose
+MEAN_DECODE_LEN = 200
+
+# Audio embedding length 1500
+AUDIO_EMB_LEN = 1500
+
+# Audio length per MEL feature
+MELS_AUDIO_LEN = AUDIO_EMB_LEN * 2
+
+# Mask neg
+MASK_NEG = -100.0
+
+
+class HfWhisperEncoder(BaseModel):
+    """
+    HfWhisperEncoder optimized for export and inference.
+
+    It takes audio input (mel) and directly produce cross attention
+    kv-cache.
+    """
+
+    def __init__(
+        self, config: WhisperConfig, model: WhisperEncoder | None = None
+    ) -> None:
+        super().__init__()
+        self.encoder = model
+        self.config = config
+        self.eval()
+
+    def forward(self, input_features: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        # Return cross attention key and value cache tensors
+        assert self.encoder is not None, "model is None"
+        return self.encoder(input_features)[0]
+
+    @staticmethod
+    def get_input_spec(num_mel_bin: int = 80) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type). This can be
+        used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        return dict(input_features=((1, num_mel_bin, MELS_AUDIO_LEN), "float32"))
+
+    def _get_input_spec_for_instance(self) -> InputSpec:
+        return self.__class__.get_input_spec(
+            self.config.num_mel_bins,
+        )
+
+    @staticmethod
+    def get_output_names(
+        num_blocks: int = 12,
+    ) -> list[str]:
+        return [
+            f"{prefix}_cache_cross_{i}"
+            for i in range(num_blocks)
+            for prefix in ("k", "v")
+        ]
+
+    def _get_output_names_for_instance(self) -> list[str]:
+        return self.__class__.get_output_names(self.config.decoder_layers)
+
+    @classmethod
+    def from_pretrained(cls, hf_whisper_version: str = "openai/whisper-base") -> Self:
+        model = HfWhisper.load_whisper_model(hf_whisper_version)
+        return cls(cast(WhisperConfig, model.config), model.get_encoder())
+
+    def get_hub_profile_options(
+        self, target_runtime: TargetRuntime, other_profile_options: str = ""
+    ) -> str:
+        profile_options = super().get_hub_profile_options(
+            target_runtime, other_profile_options
+        )
+        if (
+            target_runtime == TargetRuntime.TFLITE
+            and "--compute_unit" not in profile_options
+        ):
+            profile_options = profile_options + " --compute_unit gpu"
+        return profile_options + " --max_profiler_iterations 10"
+
+    def get_hub_compile_options(
+        self,
+        target_runtime: TargetRuntime,
+        precision: Precision,
+        other_compile_options: str = "",
+        device: Device | None = None,
+    ) -> str:
+        compile_options = super().get_hub_compile_options(
+            target_runtime, precision, other_compile_options, device
+        )
+        if (
+            precision == Precision.float
+            and target_runtime.qairt_version_changes_compilation
+        ):
+            compile_options = (
+                compile_options + " --quantize_full_type float16 --quantize_io"
+            )
+        return compile_options
+
+
+class HfWhisperDecoder(BaseModel):
+    """
+    HfWhisperDecoder optimized for export and inference:
+
+    Wraps `HfWhisperDecoder` to facilitate export.
+    """
+
+    def __init__(
+        self, config: WhisperConfig, model: WhisperDecoder | None = None
+    ) -> None:
+        super().__init__()
+        self.decoder = model
+        self.config = config
+        self.eval()
+
+    @property
+    def num_blocks(self) -> int:
+        return self.config.decoder_layers
+
+    def forward(
+        self,
+        *args: Any,
+    ) -> tuple[torch.Tensor, ...]:
+        """
+        Parameters
+        ----------
+        *args
+            Variadic arguments containing in order:
+
+            input_ids
+                The text tokens with shape (batch_size, <= n_ctx).
+            attention_mask
+                Mask to avoid performing attention on padding token indices
+                with shape (1, 1, 1, 200).
+            kv_caches
+                Key/value caches for self and cross attention. For each layer i:
+
+                k_cache_self_{i}_in
+                    Key cache for self attention with shape
+                    [num_heads, 1, attn_dim/num_heads, self.max_decode_len - 1].
+                    Pass zeros for first call (index 0), otherwise pass in
+                    previous decoder output.
+                v_cache_self_{i}_in
+                    Value cache for self attention with shape
+                    [num_heads, 1, self.max_decode_len - 1, attn_dim/num_heads].
+                    Pass zeros for first call (index 0), otherwise pass in
+                    previous decoder output.
+                k_cache_cross_{i}
+                    Key cache for cross attention with shape
+                    [num_heads, 1, attn_dim/num_heads, AUDIO_EMB_LEN].
+                v_cache_cross_{i}
+                    Value cache for cross attention with shape
+                    [num_heads, 1, AUDIO_EMB_LEN, attn_dim/num_heads].
+            position_ids
+                Index to get positional encoding with shape (1).
+
+        Returns
+        -------
+        output : tuple[torch.Tensor, ...]
+            logits
+                Output logits of shape [1, 51865, 1, 1].
+            kv_cache_self_new
+                Updated key value cache for self attention.
+        """
+        assert self.decoder is not None, "model is None"
+        input_ids = args[0]
+        attention_mask = args[1]
+        kv_caches = args[2:-1]
+        kv_cache_self = [
+            (kv_caches[i], kv_caches[i + 1]) for i in range(0, self.num_blocks * 2, 2)
+        ]
+        kv_cache_cross = [
+            (kv_caches[i], kv_caches[i + 1])
+            for i in range(
+                self.num_blocks * 2,
+                self.num_blocks * 4,
+                2,
+            )
+        ]
+        position_ids = args[-1]
+        position_ids = position_ids.to(torch.int64)
+
+        logits, kv_cache_self_new = self.decoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            past_key_values=kv_cache_self,
+            cross_attn_past_key_value=kv_cache_cross,
+            position_ids=position_ids,
+        )
+        return logits, kv_cache_self_new
+
+    @staticmethod
+    def get_input_spec(
+        num_blocks: int = 12,
+        attention_dim: int = 768,
+        num_heads: int = 12,
+    ) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type). This can be
+        used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        specs = dict(
+            input_ids=((1, 1), "int32"),
+            attention_mask=((1, 1, 1, MEAN_DECODE_LEN), "float32"),
+        )
+        kv_cache_self = {}
+        for i in range(num_blocks):
+            kv_cache_self[f"k_cache_self_{i}_in"] = (
+                (num_heads, 1, attention_dim // num_heads, MEAN_DECODE_LEN - 1),
+                "float32",
+            )
+            kv_cache_self[f"v_cache_self_{i}_in"] = (
+                (num_heads, 1, MEAN_DECODE_LEN - 1, attention_dim // num_heads),
+                "float32",
+            )
+        kv_cache_cross = {}
+        for i in range(num_blocks):
+            kv_cache_cross[f"k_cache_cross_{i}"] = (
+                (num_heads, 1, attention_dim // num_heads, AUDIO_EMB_LEN),
+                "float32",
+            )
+            kv_cache_cross[f"v_cache_cross_{i}"] = (
+                (num_heads, 1, AUDIO_EMB_LEN, attention_dim // num_heads),
+                "float32",
+            )
+        specs.update(kv_cache_self)
+        specs.update(kv_cache_cross)
+        specs["position_ids"] = ((1,), "int32")
+
+        return specs
+
+    def _get_input_spec_for_instance(self) -> InputSpec:
+        return self.__class__.get_input_spec(
+            self.config.decoder_layers,
+            self.config.d_model,
+            self.config.decoder_attention_heads,
+        )
+
+    @staticmethod
+    def get_output_names(
+        num_blocks: int = 12,
+    ) -> list[str]:
+        return ["logits"] + [
+            f"{prefix}_cache_self_{i}_out"
+            for i in range(num_blocks)
+            for prefix in ("k", "v")
+        ]
+
+    def _get_output_names_for_instance(self) -> list[str]:
+        return self.__class__.get_output_names(self.num_blocks)
+
+    @classmethod
+    def from_pretrained(cls, hf_whisper_version: str = "openai/whisper-base") -> Self:
+        model = HfWhisper.load_whisper_model(hf_whisper_version)
+        return cls(cast(WhisperConfig, model.config), model.get_decoder())
+
+    def get_hub_compile_options(
+        self,
+        target_runtime: TargetRuntime,
+        precision: Precision,
+        other_compile_options: str = "",
+        device: Device | None = None,
+    ) -> str:
+        compile_options = super().get_hub_compile_options(
+            target_runtime, precision, other_compile_options, device
+        )
+        if (
+            precision == Precision.float
+            and target_runtime.qairt_version_changes_compilation
+        ):
+            compile_options = (
+                compile_options + " --quantize_full_type float16 --quantize_io"
+            )
+        return compile_options
+
+
+class HfWhisper(CollectionModel):
+    def __init__(
+        self,
+        encoder: HfWhisperEncoder,
+        decoder: HfWhisperDecoder,
+        config: WhisperConfig,
+        hf_source: str,
+    ) -> None:
+        super().__init__(encoder, decoder)
+        self.encoder = encoder
+        self.decoder = decoder
+        self.config = config
+        self.hf_source = hf_source
+
+    @classmethod
+    def load_whisper_model(
+        cls, hf_whisper_version: str | None = None
+    ) -> WhisperForConditionalGeneration:
+        hf_whisper_version = (
+            cls.get_hf_whisper_version()
+            if hf_whisper_version is None
+            else hf_whisper_version
+        )
+        orig_whisper = cast(
+            WhisperForConditionalGeneration,
+            WhisperForConditionalGeneration.from_pretrained(hf_whisper_version),
+        )
+        orig_whisper.config.return_dict = False
+        orig_whisper.config.tie_word_embeddings = False
+        orig_whisper.config.mask_neg = MASK_NEG
+        monkey_patch_model(orig_whisper.model)
+        return cast(WhisperForConditionalGeneration, orig_whisper)
+
+    @classmethod
+    @abstractmethod
+    def get_hf_whisper_version(cls) -> str:
+        pass
+
+    @classmethod
+    def from_pretrained(cls) -> Self:
+        whisper = cls.load_whisper_model()
+        config = cast(WhisperConfig, whisper.config)
+        encoder = HfWhisperEncoder(config, whisper.get_encoder())
+        decoder = HfWhisperDecoder(config, whisper.get_decoder())
+        return cls(encoder, decoder, config, cls.get_hf_whisper_version())
+
+
+def get_feature_extractor(
+    hf_whisper_version: str = "openai/whisper-small",
+) -> WhisperFeatureExtractor:
+    """feature_extractor to use for Whisper"""
+    return WhisperFeatureExtractor.from_pretrained(hf_whisper_version)
+
+
+def get_tokenizer(hf_whisper_version: str = "openai/whisper-small") -> WhisperTokenizer:
+    """Tokenizer to use for Whisper"""
+    return WhisperTokenizer.from_pretrained(hf_whisper_version)

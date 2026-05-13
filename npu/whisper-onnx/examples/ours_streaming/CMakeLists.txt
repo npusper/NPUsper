@@ -1,0 +1,5 @@
+add_executable(ours_streaming ours_streaming.cpp)
+target_link_libraries(ours_streaming PRIVATE common whisper_ort)
+
+add_executable(ours_streaming_per_word_latency ours_streaming_per_word_latency.cpp)
+target_link_libraries(ours_streaming_per_word_latency PRIVATE common whisper_ort)

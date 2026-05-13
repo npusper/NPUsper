@@ -1,0 +1,51 @@
+__pycache__/
+*.pyc
+npu_env/
+qnn_env/
+tmp_inference/
+*.hprof
+*.bin
+
+# Local build outputs
+build/
+build_*/
+build_android/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.obj
+*.exe
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+
+# QAIRT / QNN / ONNX generated artifacts
+*.dlc
+*.onnx
+*.onnx.data
+xplus_build/
+xplus_build_*/
+s25_xplus_compat_build_*/
+nstep_local/
+nstep_local_*/
+onnx/
+dlc/
+output/
+wrappers/
+
+# Deploy and scratch directories generated locally
+deploy_s25/
+deploy_s25_*/
+tmp/
+scratch/
+wip/
+.cache/
+
+# Nested working copies and local investigations
+hj_cpp_whisper/
+investigations/

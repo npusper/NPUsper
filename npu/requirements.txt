@@ -1,0 +1,2 @@
+# Default Python environment for exporting and compiling the NPU model artifacts.
+-r requirements-compile.txt
