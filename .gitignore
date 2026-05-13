@@ -1,0 +1,50 @@
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build outputs
+build/
+build*/
+out/
+dist/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Runtime and evaluation artifacts
+*.log
+*.csv
+*.jsonl
+eval_results*/
+results*/
+tmp*/
+
+# Large generated model artifacts
+*.onnx
+*.ort
+*.serialized
+*.bin
+*.dlc
+*.ctx
+*.gguf
+*.tflite
+*.pt
+*.pth
+*.safetensors
+*.wav
+*.mp3
+*.flac
+*.zip
+
+# Explicitly keep tiny required metadata binaries.
+!whisper-onnx-xplus/runtime/whisper-onnx/models/base/mel_filters.bin

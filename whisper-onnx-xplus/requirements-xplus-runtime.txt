@@ -1,0 +1,2 @@
+# Windows ARM64 / Snapdragon X Plus runtime package
+onnxruntime-qnn==1.23.2
