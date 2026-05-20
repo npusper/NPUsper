@@ -1,6 +1,14 @@
-# live-transcription
+# NPUsper: Eliminating Redundant Computation for Real-Time Whisper on Mobile NPUs
 
-Streaming speech recognition with multi-device build support.
+## Demo
+
+<video src="https://github.com/user-attachments/assets/3ebb8121-a2c0-494b-bf00-591ef462cbc0" controls width="100%"></video>
+
+## Overview
+
+![Overview](overview.png)
+
+We present NPUsper, a live transcription system that makes Whisper efficient on mobile NPUs by eliminating redundant computation. To avoid the heavy padding used by prior streaming systems, NPUsper detects hallucinated tokens online from temporal patterns in decoder cross-attention, allowing each inference round to process short audio inputs with minimal carryover. For efficient mobile-NPU execution, we propose controlled unrolling, which executes autoregressive decoding as K-step chunk graphs, removing unnecessary KV-cache computation and reducing graph-dispatch overhead. NPUsper achieves up to 4.84× lower per-word latency, up to 33.2× lower time-to-first-token (TTFT), and up to 88.64% lower average power consumption compared with baselines, while maintaining comparable transcription accuracy.
 
 ## Repository Structure
 
