@@ -2,7 +2,7 @@
 
 ## Demo
 
-<video src="https://github.com/user-attachments/assets/3ebb8121-a2c0-494b-bf00-591ef462cbc0" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/d1a675ec-14e9-49e9-81b2-159ff8c9401d" controls width="100%"></video>
 
 ## Overview
 
