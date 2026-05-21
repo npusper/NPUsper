@@ -15,5 +15,5 @@ __pycache__/
 *.tsv
 *.jsonl
 !.gitignore
-!deploy_templates/**/*.json
-!runtime/whisper-onnx/models/base/mel_filters.bin
+!reference_config/**/*.json
+!whisper-onnx/models/base/mel_filters.bin

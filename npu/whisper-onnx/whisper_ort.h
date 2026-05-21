@@ -36,7 +36,7 @@ struct whisper_context_params {
     bool use_npu;     // QNN EP with N/K unrolled decoder (per-bucket models)
     bool use_cpu_ep;  // force CPU EP for NPU model debugging on x86
     const char * qnn_htp_path;  // absolute path to QnnHtp.dll (nullptr = auto)
-    bool npu_restricted_mode3;  // restrict runtime buckets to mode3-restricted policy
+    bool npu_final_bucket_policy;  // use the final X Plus runtime bucket policy
 };
 
 whisper_context_params whisper_context_default_params();

@@ -20,7 +20,7 @@ You can now use it like this:
   $ ./build/win-arm-opencl/bin/ours_streaming -m models/ggml-base.en.bin --step 2000 --no-realtime test_speech.wav
 ```
 
-For this X Plus branch, use `examples/ours_streaming` as documented in the top-level `whisper-ggml-xplus/README.md`. Audio files are positional arguments for `ours_streaming`.
+For this X Plus branch, use `examples/ours_streaming` as documented in `gpu/whisper-ggml/README.md`. Audio files are positional arguments for `ours_streaming`.
 
 ### 2. Manually download pre-converted models
 

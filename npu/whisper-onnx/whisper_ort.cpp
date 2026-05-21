@@ -177,7 +177,7 @@ struct whisper_context {
     std::vector<float> npu_buckets_sec;
     std::vector<float> npu_runtime_buckets_sec;
     std::map<float, int> npu_bucket_audio_emb_len;
-    bool npu_restricted_mode3 = false;
+    bool npu_final_bucket_policy = false;
     bool npu_split_family_bins = false;
 
     // Per-chain K table (chunks 0..num_chunks-1).
@@ -1225,7 +1225,7 @@ static bool npu_ensure_prefill_family(
 
 static bool npu_load_bucket_sessions(whisper_context * ctx, float bucket) {
     const bool single_bucket_lazy_mode =
-        ctx->npu_restricted_mode3 &&
+        ctx->npu_final_bucket_policy &&
         !g_npu_share_ep_contexts &&
         !ctx->npu_split_family_bins;
 
@@ -1234,7 +1234,7 @@ static bool npu_load_bucket_sessions(whisper_context * ctx, float bucket) {
         !ctx->npu_sessions.empty()) {
         fprintf(stderr,
                 "%s: evicting %zu cached bucket session(s) before loading %.0fs "
-                "(restricted_mode3=1, share_ep_contexts=0)\n",
+                "(final_bucket_policy=1, share_ep_contexts=0)\n",
                 __func__, ctx->npu_sessions.size(), bucket);
         ctx->npu_sessions.clear();
         ctx->npu_loaded_bucket = -1.0f;
@@ -1245,7 +1245,7 @@ static bool npu_load_bucket_sessions(whisper_context * ctx, float bucket) {
         return true;
     }
 
-    if (!ctx->npu_restricted_mode3) {
+    if (!ctx->npu_final_bucket_policy) {
         ctx->npu_sessions.clear();
         ctx->npu_loaded_bucket = -1.0f;
     }
@@ -1305,7 +1305,7 @@ static bool npu_load_bucket_sessions(whisper_context * ctx, float bucket) {
         fprintf(stderr,
                 "%s: %sloaded NPU bucket %.0fs (%s) [cached=%zu]\n",
                 __func__,
-                ctx->npu_restricted_mode3 ? "" : "lazily ",
+                ctx->npu_final_bucket_policy ? "" : "lazily ",
                 bucket,
                 ctx->npu_use_1step ? "1-step" : "N/K",
                 ctx->npu_sessions.size());
@@ -1395,7 +1395,7 @@ whisper_context_params whisper_context_default_params() {
     p.use_npu    = false;
     p.use_cpu_ep = false;
     p.qnn_htp_path = nullptr;
-    p.npu_restricted_mode3 = false;
+    p.npu_final_bucket_policy = false;
     return p;
 }
 
@@ -1422,7 +1422,7 @@ whisper_context * whisper_init_from_file_with_params(
         ctx->npu_model_name  = cfg.model;
         ctx->npu_alignment_heads_preset = cfg.alignment_heads_preset;
         ctx->npu_alignment_heads_spec = cfg.alignment_heads;
-        ctx->npu_restricted_mode3 = params.npu_restricted_mode3;
+        ctx->npu_final_bucket_policy = params.npu_final_bucket_policy;
         g_npu_qnn_htp_arch.clear();
         g_npu_qnn_soc_model.clear();
         if (cfg.target_device.find("QCS6490") != std::string::npos ||
@@ -1516,7 +1516,7 @@ whisper_context * whisper_init_from_file_with_params(
             ctx->npu_bucket_audio_emb_len[bucket] = emb;
         }
 
-        if (ctx->npu_restricted_mode3) {
+        if (ctx->npu_final_bucket_policy) {
             std::vector<float> restricted;
             for (float bucket : ctx->npu_buckets_sec) {
                 if (bucket >= 3.0f && bucket <= 6.0f) {
@@ -1562,7 +1562,7 @@ whisper_context * whisper_init_from_file_with_params(
         // backend_path (QnnHtp.dll) must be in the onnxruntime capi directory where all
         // QNN DLL dependencies (QnnHtpV73Stub, QnnSystem, libQnnHtpV73Skel.so) reside.
         const bool rubik_qcs6490 = is_rubik_runtime();
-        if (ctx->npu_restricted_mode3 &&
+        if (ctx->npu_final_bucket_policy &&
             !rubik_qcs6490 &&
             g_npu_share_ep_contexts &&
             !ctx->npu_split_family_bins) {
@@ -1815,7 +1815,7 @@ int whisper_encode(whisper_context * ctx, int /*offset*/, int /*n_threads*/) {
         float bucket;
         if (ctx->npu_force_30s && ctx->npu_has_30s_reinfer) {
             bucket = 30.0f;  // forced 30s for reinference
-        } else if (ctx->npu_restricted_mode3 &&
+        } else if (ctx->npu_final_bucket_policy &&
                    ctx->npu_has_30s_reinfer &&
                    !ctx->npu_runtime_buckets_sec.empty() &&
                    audio_sec > ctx->npu_runtime_buckets_sec.back()) {
@@ -2658,7 +2658,7 @@ int whisper_decode(whisper_context * ctx,
                 return -1;
             }
             // Empty-prompt starts must use the normal chain. Falling back to a
-            // synthetic prefill chain changes mode3 semantics relative to ggml.
+            // Synthetic prefill changes the final carryover semantics relative to GGML.
             auto & bucket_sess = ctx->npu_sessions.at(ctx->npu_current_bucket);
             if (chosen_chain == 0 && !bucket_sess.has_normal_wrappers) {
                 fprintf(stderr,

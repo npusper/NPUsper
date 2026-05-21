@@ -7,7 +7,7 @@ This directory keeps only the files needed to build and run the final GGML + Ope
 - `CMakeLists.txt`, `cmake/`, `vendor/ggml/`: build system and vendored GGML source required for OpenCL.
 - `whisper.cpp`, `whisper.h`, `adapter/`: runtime source used by the final executable.
 - `examples/ours_streaming/`: final NPUsper streaming executable.
-- `models/`: model download and conversion helpers.
+- `models/`: GGML model download and conversion helpers.
 
 ## Excluded
 

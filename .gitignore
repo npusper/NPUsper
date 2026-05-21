@@ -47,4 +47,4 @@ tmp*/
 *.zip
 
 # Explicitly keep tiny required metadata binaries.
-!whisper-onnx-xplus/runtime/whisper-onnx/models/base/mel_filters.bin
+!npu/whisper-onnx/models/base/mel_filters.bin

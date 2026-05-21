@@ -49,7 +49,7 @@ struct ours_streaming_params {
     float   peak_margin_sec        = 0.0f; // margin zone near chunk end (0 = disabled)
     float   carryover_overlap_sec  = 0.0f; // overlap before peak for carryover
     float   min_chunk_sec          = 0.0f; // min effective audio duration
-    int32_t carryover_mode         = 0;    // 0=peak, 1=pfill, 2=olap, 3=olap+reinfer
+    int32_t carryover_mode         = 0;    // 0=peak, 1=pfill, 2=olap, 3=olap+fallback
     float   word_end_offset_sec    = 0.0f; // offset after DTW word end for carryover
 
     // Prompt & EOT control
@@ -62,7 +62,7 @@ struct ours_streaming_params {
     bool use_gpu       = true;
     bool use_npu       = false;  // QNN EP with N/K unrolled decoder
     bool use_cpu_ep    = false;  // CPU EP for NPU model debugging
-    bool npu_restricted_mode3 = false; // restricted mode3 runtime buckets [3..6], >6s -> 30s
+    bool npu_final_bucket_policy = false; // runtime buckets [3..6], >6s -> 30s fallback
     std::string qnn_htp_path;   // absolute path to QnnHtp.dll (required for NPU)
     bool no_realtime   = false;  // skip sleep, process chunks as fast as possible
     bool no_postprocess = false; // disable dedup and prompt prefill
@@ -118,7 +118,7 @@ bool params_parse(int argc, char ** argv, ours_streaming_params & params) {
         else if (arg == "-ng"  || arg == "--no-gpu")               { params.use_gpu               = false; }
         else if (               arg == "--use-npu")               { params.use_npu               = true; }
         else if (               arg == "--use-cpu-ep")            { params.use_cpu_ep            = true; }
-        else if (               arg == "--npu-restricted-mode3")  { params.npu_restricted_mode3  = true; }
+        else if (               arg == "--npu-final-buckets")     { params.npu_final_bucket_policy = true; }
         else if (               arg == "--qnn-htp-path")          { params.qnn_htp_path          = argv[++i]; }
         else if (               arg == "--aheads-preset")         { params.aheads_preset_name    = argv[++i]; }
         else if (               arg == "--no-realtime")            { params.no_realtime           = true; }
@@ -147,7 +147,7 @@ void print_usage(int /*argc*/, char ** argv, const ours_streaming_params & param
     fprintf(stderr, "            --peak-margin F     [%-7.2f] peak margin seconds\n",              params.peak_margin_sec);
     fprintf(stderr, "            --carryover-overlap F[%-6.2f] overlap before peak\n",             params.carryover_overlap_sec);
     fprintf(stderr, "            --min-chunk F       [%-7.2f] min effective audio seconds\n",      params.min_chunk_sec);
-    fprintf(stderr, "            --carryover-mode N  [%-7d] carryover mode (0=peak,1=pfill,2=olap,3=olap+reinfer)\n", params.carryover_mode);
+    fprintf(stderr, "            --carryover-mode N  [%-7d] carryover mode (0=peak,1=pfill,2=olap,3=olap+fallback)\n", params.carryover_mode);
     fprintf(stderr, "            --word-end-offset F [%-7.2f] offset for DTW carryover\n", params.word_end_offset_sec);
     fprintf(stderr, "            --prompt-prefill N  [%-7d] tokens from prev chunk\n",             params.prompt_prefill_n);
     fprintf(stderr, "            --skip-eot          [%-7s] suppress EOT generation\n",            params.skip_eot ? "true" : "false");
@@ -160,7 +160,7 @@ void print_usage(int /*argc*/, char ** argv, const ours_streaming_params & param
     fprintf(stderr, "  -ng,      --no-gpu            [%-7s] disable GPU\n",                        params.use_gpu ? "false" : "true");
     fprintf(stderr, "            --use-npu           [%-7s] use QNN EP with N/K unrolled decoder\n", params.use_npu ? "true" : "false");
     fprintf(stderr, "            --use-cpu-ep        [%-7s] use CPU EP for NPU model debugging\n",   params.use_cpu_ep ? "true" : "false");
-    fprintf(stderr, "            --npu-restricted-mode3 [%-4s] runtime buckets [3..6], >6s -> 30s fallback\n", params.npu_restricted_mode3 ? "true" : "false");
+    fprintf(stderr, "            --npu-final-buckets [%-4s] runtime buckets [3..6], >6s -> 30s fallback\n", params.npu_final_bucket_policy ? "true" : "false");
     fprintf(stderr, "            --qnn-htp-path PATH           absolute path to QnnHtp.dll (required for NPU)\n");
     fprintf(stderr, "            --no-realtime       [%-7s] skip sleep, process as fast as possible\n", params.no_realtime ? "true" : "false");
     fprintf(stderr, "            --no-postprocess    [%-7s] disable dedup and prompt prefill\n",    params.no_postprocess ? "true" : "false");
@@ -939,7 +939,7 @@ int main(int argc, char ** argv) {
     cparams.use_npu      = params.use_npu;
     cparams.use_cpu_ep   = params.use_cpu_ep;
     cparams.qnn_htp_path = params.qnn_htp_path.empty() ? nullptr : params.qnn_htp_path.c_str();
-    cparams.npu_restricted_mode3 = params.npu_restricted_mode3;
+    cparams.npu_final_bucket_policy = params.npu_final_bucket_policy;
     cparams.flash_attn = false;
 
     // Enable alignment heads DTW if carryover mode uses DTW (mode 1, 2, 3)
@@ -1053,7 +1053,7 @@ int main(int argc, char ** argv) {
     int speculative_committed_count = 0;             // number of speculatively committed tokens
     std::vector<whisper_token> pre_speculative_prefill; // prefill from before speculative round
 
-    // Mode 3: track repeated backward_peak at same step/token for reinfer trigger
+    // Track repeated backward_peak at the same step/token for the fallback trigger.
     int prev_bp_step = -1;
     whisper_token prev_bp_token = -1;
     int consecutive_same_bp_count = 0;
@@ -1774,7 +1774,7 @@ int main(int argc, char ** argv) {
         bool carryover_full_audio_logged = false;
         bool carryover_capped_logged = false;
 
-        // Mode 3: track backward_peak step/token for reinfer trigger
+        // Track backward_peak step/token for the fallback trigger.
         if (params.carryover_mode == 3 && stopped_by_backward_peak && stop_token_idx >= 0) {
             whisper_token bp_tok = decoded_tokens[stop_token_idx];
             if (bp_tok == prev_bp_token && stop_token_idx == prev_bp_step) {
@@ -1790,16 +1790,16 @@ int main(int argc, char ** argv) {
             prev_bp_token = -1;
         }
 
-        // Mode 3: reinfer with 30s padding if 2+ consecutive same step/token backward_peak
-        const bool mode3_reinfer_available =
+        // Re-run with 30s padding after repeated boundary instability.
+        const bool fallback_reinfer_available =
             !params.use_npu || whisper_npu_has_30s_reinfer(ctx);
-        const bool mode3_reinfer_same_bp =
-            params.carryover_mode == 3 && mode3_reinfer_available && consecutive_same_bp_count >= 2;
-        const bool mode3_reinfer_speculative =
-            params.carryover_mode == 3 && mode3_reinfer_available && consecutive_speculative_count >= 2;
+        const bool fallback_reinfer_same_bp =
+            params.carryover_mode == 3 && fallback_reinfer_available && consecutive_same_bp_count >= 2;
+        const bool fallback_reinfer_speculative =
+            params.carryover_mode == 3 && fallback_reinfer_available && consecutive_speculative_count >= 2;
 
         if (params.carryover_mode == 3 && !reinfer_done &&
-            (mode3_reinfer_same_bp || mode3_reinfer_speculative))
+            (fallback_reinfer_same_bp || fallback_reinfer_speculative))
         {
             // 1. Undo all speculative tokens from previous rounds
             if (prev_speculative && speculative_committed_count > 0) {
@@ -1817,7 +1817,7 @@ int main(int argc, char ** argv) {
 
             // 2. No prefill for reinfer — let whisper_full decode from audio alone
             if (params.debug) {
-                if (mode3_reinfer_same_bp) {
+                if (fallback_reinfer_same_bp) {
                     fprintf(stderr, "  [REINFER] %d consecutive backward_peak at same step/token, re-inferring with 30s padding (no prefill)\n",
                             consecutive_same_bp_count);
                 } else {

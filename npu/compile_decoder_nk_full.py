@@ -14,11 +14,10 @@ Per-bucket compilation matrix:
       0_prefill_p1..p4, 1_prefill_p1..p4,
       2, 3, 4, 5
 
-Normal chain is now compiled for every bucket. This is required for mode3:
-after a 30s reinfer, the next round resumes with no prompt prefill, but the
-effective audio may still land in a bucket > 2s. Restricting "normal" to 2s
-changes the decoder state machine relative to ggml and forces synthetic
-prefill fallbacks at runtime.
+Normal chain is compiled for every bucket. After a 30s fallback pass, the next
+round resumes with no prompt prefill, but the effective audio may still land in
+a bucket > 2s. Restricting "normal" to 2s changes the decoder state machine
+relative to GGML and forces synthetic prefill fallbacks at runtime.
 
 Output per bucket:
   build/{bucket}s/output/whisper_decoder_nk_full_{bucket}s_xplus.bin

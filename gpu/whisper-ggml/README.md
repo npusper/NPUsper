@@ -1,14 +1,15 @@
-# whisper-ggml-xplus
+# NPUsper GPU
 
-GGML / whisper.cpp runtime for running NPUsper with the Adreno OpenCL backend on a Snapdragon X Plus laptop.
+GGML / whisper.cpp path for running NPUsper with the Adreno OpenCL backend on a Snapdragon X Plus laptop.
 
-This directory is the GPU-side reproduction path. It is separate from `whisper-onnx-xplus`, which targets the QNN NPU deploy flow.
+This directory is independent from the NPU path. It builds a Windows ARM64 `ours_streaming.exe` that loads a GGML Whisper model and uses the OpenCL backend by default.
 
-## What This Contains
+## Layout
 
 ```text
 CMakeLists.txt              Build entry point for whisper.cpp + GGML OpenCL
 whisper.cpp / whisper.h     Modified Whisper runtime
+adapter/                    Small compatibility layer used by the runtime
 vendor/ggml/                Vendored GGML source with OpenCL backend support
 examples/ours_streaming/    Final NPUsper streaming executable
 models/                     GGML model download and conversion helpers
@@ -25,10 +26,10 @@ Required tools:
 - Windows 11 ARM64
 - CMake
 - Ninja
-- A Windows ARM64 C++ compiler, for example `clang-cl`
+- ARM64 C++ compiler, for example `clang-cl`
 - Python 3.11 ARM64
 - Qualcomm/Windows OpenCL runtime from the device GPU driver
-- OpenCL build-time headers and import library, for example from vcpkg `opencl`
+- OpenCL build-time headers and import library
 
 ## OpenCL Build Dependency
 
@@ -42,11 +43,20 @@ C:\src\vcpkg\vcpkg install opencl:arm64-windows
 
 The Qualcomm GPU driver provides the runtime implementation on the X Plus laptop. vcpkg provides the files CMake needs at configure time.
 
-## Build
-
-Open a Windows ARM64 developer shell in this directory.
+If you install OpenCL manually instead of vcpkg, pass the paths explicitly during CMake configure:
 
 ```powershell
+-DOpenCL_INCLUDE_DIR=C:\path\to\OpenCL\include `
+-DOpenCL_LIBRARY=C:\path\to\OpenCL.lib
+```
+
+## Build
+
+Open a Windows ARM64 developer shell in this directory:
+
+```powershell
+cd <repo>\gpu\whisper-ggml
+
 cmake -S . -B build\win-arm-opencl -G Ninja `
   -DCMAKE_TOOLCHAIN_FILE=C:\src\vcpkg\scripts\buildsystems\vcpkg.cmake `
   -DVCPKG_TARGET_TRIPLET=arm64-windows `
@@ -63,13 +73,6 @@ Expected binary:
 
 ```text
 build\win-arm-opencl\bin\ours_streaming.exe
-```
-
-If you install OpenCL manually instead of vcpkg, pass the paths explicitly:
-
-```powershell
--DOpenCL_INCLUDE_DIR=C:\path\to\OpenCL\include `
--DOpenCL_LIBRARY=C:\path\to\OpenCL.lib
 ```
 
 ## OpenMP Runtime DLL
@@ -100,12 +103,12 @@ Expected model path:
 models\ggml-base.bin
 ```
 
-## Run NPUsper Streaming
+## Run
 
 Generate a smoke-test WAV if needed:
 
 ```powershell
-py -3.11-arm64 ..\scripts\make_smoke_wav.py .\test_speech.wav
+py -3.11-arm64 ..\..\scripts\make_smoke_wav.py .\test_speech.wav
 ```
 
 Run the streaming executable. WAV files are positional arguments; this executable does not accept `-f`.
@@ -118,13 +121,10 @@ Run the streaming executable. WAV files are positional arguments; this executabl
   .\test_speech.wav
 ```
 
-GPU execution is enabled by default. Use `-ng` only when you intentionally want to compare against CPU execution. Use real speech audio instead of the generated smoke WAV when validating transcription quality.
+GPU execution is enabled by default. Use `-ng` only when intentionally comparing against CPU execution.
+
+Use real speech audio for transcription quality checks. The generated WAV only verifies runtime plumbing.
 
 ## Artifact Policy
 
-Do not commit:
-
-- `build*` directories
-- downloaded `models\ggml-*.bin`
-- WAV/audio files
-- logs, CSV files, or temporary run outputs
+Do not commit build directories, downloaded `models\ggml-*.bin`, WAV files, logs, CSV files, or temporary run outputs.

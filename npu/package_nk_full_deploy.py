@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stage bucketed decoder artifacts for deployment to deploy_mode3.
+Stage bucketed decoder artifacts for the X Plus NPU runtime directory.
 
 Flow:
   1. For each compiled bucket (xplus_build_nk_full/{N}s/), copy
@@ -9,7 +9,7 @@ Flow:
      into a flat staging directory.
   2. Patch each wrapper's ep_cache_context attr to be a basename only (so the
      wrapper finds the bin sitting in the same flat directory).
-  3. Write the new config.json with decoder mode metadata.
+  3. Write config.json with decoder metadata.
   4. Print a one-liner scp command for pushing to the target X Plus laptop.
 """
 
@@ -28,7 +28,7 @@ TARGET_PROFILE = resolve_target_profile("xplus")
 BUILD_ROOT = Path(default_build_dir("nk_full", MODEL_PROFILE, TARGET_PROFILE))
 BUILD_ROOT_1STEP_PATTERN = default_build_dir("decoder_1step_bucket", MODEL_PROFILE, TARGET_PROFILE)
 ENCODER_BUILD_ROOT = Path(default_build_dir("encoder", MODEL_PROFILE, TARGET_PROFILE))
-STAGE_DIR = Path("/tmp/deploy_nk_full")
+STAGE_DIR = Path("/tmp/npusper_npu")
 
 # Must match the K table in compile_decoder_nk_full.py
 K_NORMAL  = [4, 6, 5, 5, 5, 5]
@@ -43,7 +43,6 @@ DECODER_MODE_1STEP = "1step"
 DECODER_1STEP_KV_CACHE_SIZE = 199
 REINFER_30S_KV_CACHE_SIZE = 199
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
 
 
 def support_file_candidates(model_profile):
@@ -53,14 +52,8 @@ def support_file_candidates(model_profile):
     candidates = []
     for key in keys:
         candidates.append(
-            REPO_ROOT / "runtime" / "whisper-onnx" / "models" / key
+            SCRIPT_DIR / "whisper-onnx" / "models" / key
         )
-        candidates.append(
-            SCRIPT_DIR / "hj_cpp_whisper" / "live-transcription" / "whisper-onnx" / "models" / key
-        )
-    candidates.append(REPO_ROOT / "deploy_templates" / "mode3")
-    candidates.append(SCRIPT_DIR / "hj_cpp_whisper" / "live-transcription" / "deploy_mode2_template")
-    candidates.append(SCRIPT_DIR / "hj_cpp_whisper" / "live-transcription" / "deploy_mode3_template")
     return candidates
 
 
@@ -229,7 +222,7 @@ def main():
     p.add_argument("--decoder-mode", choices=[DECODER_MODE_NK, DECODER_MODE_1STEP],
                    default=DECODER_MODE_NK)
     p.add_argument("--with-30s", action="store_true",
-                   help="Also stage encoder_30s + decoder_1step_30s for mode3 reinference")
+                   help="Also stage encoder_30s + decoder_1step_30s for the fallback path")
     p.add_argument("--reinfer-kv-cache-size", type=int, default=REINFER_30S_KV_CACHE_SIZE,
                    help="KV cache size for 30s reinference decoder (default: 199)")
     args = p.parse_args()
@@ -282,8 +275,9 @@ def main():
     print()
     print(f"Staged: {n_bin} bin + {n_onnx} onnx + 1 config.json = {total_size_mb:.0f} MB")
     print()
-    print("To push to the X Plus deploy directory:")
-    print(f"  scp {stage_dir}/* <xplus-host>:Desktop/deploy_mode3/")
+    print("To push to the X Plus runtime directory:")
+    print("  ssh <xplus-host> 'powershell -NoProfile -Command \"New-Item -ItemType Directory -Force $HOME\\Desktop\\npusper_npu | Out-Null\"'")
+    print(f"  scp {stage_dir}/* <xplus-host>:Desktop/npusper_npu/")
 
 
 if __name__ == "__main__":

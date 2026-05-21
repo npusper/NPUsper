@@ -18,6 +18,15 @@ Write-Host "Source: $root"
 Write-Host "Build:  $buildPath"
 Write-Host "ORT:    $OrtRoot"
 
+$clFlags = $env:CL
+if (-not $clFlags) {
+    $clFlags = ""
+}
+$clFlags = $clFlags.Trim()
+if ($clFlags -notmatch "(^|\s)/utf-8(\s|$)") {
+    $env:CL = ("/utf-8 " + $clFlags).Trim()
+}
+
 if (-not (Test-Path -LiteralPath $OrtRoot)) {
     throw "OrtRoot does not exist: $OrtRoot"
 }

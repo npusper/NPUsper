@@ -7,8 +7,8 @@ QAIRT_VERSION = "2.37.1.250807"
 HOST_TRIPLE = "x86_64-linux-clang"
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+def _npu_root() -> Path:
+    return Path(__file__).resolve().parent
 
 
 def qairt_converter_path(root: Path) -> Path:
@@ -34,10 +34,9 @@ def candidate_qnn_sdk_roots() -> list[Path]:
     if env:
         candidates.append(Path(env).expanduser())
 
-    repo_root = _repo_root()
+    npu_root = _npu_root()
     candidates.extend([
-        repo_root / "qairt" / QAIRT_VERSION,
-        Path(__file__).resolve().parent / "qairt" / QAIRT_VERSION,
+        npu_root / "qairt" / QAIRT_VERSION,
         Path.home() / "qairt" / QAIRT_VERSION,
         Path("/opt/qairt") / QAIRT_VERSION,
         Path("/opt/qualcomm/qairt") / QAIRT_VERSION,
@@ -63,7 +62,7 @@ def resolve_qnn_sdk_root() -> Path:
     if env:
         return Path(env).expanduser()
 
-    return _repo_root() / "qairt" / QAIRT_VERSION
+    return _npu_root() / "qairt" / QAIRT_VERSION
 
 
 def qairt_missing_message(root: Path) -> str:
@@ -72,7 +71,7 @@ def qairt_missing_message(root: Path) -> str:
         f"QAIRT/QNN SDK tools were not found under: {root}\n"
         f"Expected converter: {qairt_converter_path(root)}\n"
         "Install Qualcomm AI Runtime SDK 2.37.1.250807 and either set QNN_SDK_ROOT "
-        "or place it at whisper-onnx-xplus/qairt/2.37.1.250807.\n"
+        "or place it at npu/qairt/2.37.1.250807.\n"
         "Searched:\n"
         f"{candidates}"
     )
